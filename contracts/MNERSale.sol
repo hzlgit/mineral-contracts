@@ -63,22 +63,6 @@ contract MNERSale is Ownable, ReentrancyGuard {
         emit Purchase(msg.sender, msg.value, round, source, block.timestamp);
     }
 
-    function _safeTransferFrom(
-        address token,
-        address from,
-        address to,
-        uint256 amount
-    ) private {
-        if (amount == 0) {
-            return;
-        }
-        if (token == address(0)) {
-            require(msg.value == amount);
-        } else {
-            IERC20(token).safeTransferFrom(from, to, amount);
-        }
-    }
-
     function userAmounts(uint256 round, address _user)
         public
         view
@@ -109,7 +93,7 @@ contract MNERSale is Ownable, ReentrancyGuard {
         }
         payable(treasuryWallet).transfer(userAmounts(round, user) - refund);
 
-        IERC20(MNER).transfer(user, amount);
+        IERC20(MNER).safeTransfer(user, amount);
 
         emit Claim(claimId, user, amount, refund, manager);
     }
