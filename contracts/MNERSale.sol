@@ -4,44 +4,10 @@ pragma solidity ^0.8.7;
 
 import "./IERC20.sol";
 import "./SafeERC20.sol";
+import "./ReentrancyGuard.sol";
+import "./Ownable.sol";
 
-contract Ownable {
-    address internal owner;
-
-    event OwnershipTransferred(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
-
-    constructor() {
-        owner = msg.sender;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner);
-        _;
-    }
-
-    function renounceOwnership() public virtual onlyOwner {
-        _setOwner(address(0));
-    }
-
-    function transferOwnership(address newOwner) public onlyOwner {
-        require(
-            newOwner != address(0),
-            "Ownable: new owner is the zero address"
-        );
-        _setOwner(newOwner);
-    }
-
-    function _setOwner(address newOwner) private {
-        address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
-}
-
-contract MNERSale is Ownable {
+contract MNERSale is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public MNER;
@@ -50,7 +16,8 @@ contract MNERSale is Ownable {
 
     mapping(uint256 => uint256) public startTime;
     mapping(uint256 => uint256) public endTime;
-    address public manager;
+
+    address public manager = 0x3862A837c0Fd3b9eEE18C8945335c98a4F27Fb87;
 
     address public treasuryWallet;
 
@@ -59,20 +26,16 @@ contract MNERSale is Ownable {
     bytes32 public constant PERMIT_TYPEHASH =
         0xf9a20c82276f5c164d15d306ea40d25f5a3dd062f72c8a4242a88c8eba769ea2;
 
-  
-
     constructor(
         address _MNER,
+        address _treasuryWallet,
         uint256 _startTime,
         uint256 _endTime
-    ) {
+    ) Ownable(msg.sender) {
         MNER = _MNER;
+        treasuryWallet = _treasuryWallet;
         startTime[1] = _startTime;
         endTime[1] = _endTime;
-    }
-
-    function setTreasuryWallet(address _wallet) external onlyOwner {
-        treasuryWallet = _wallet;
     }
 
     function setTime(
@@ -84,16 +47,12 @@ contract MNERSale is Ownable {
         endTime[round] = _endTime;
     }
 
-    function setToken(address _mner) external onlyOwner {
-        MNER = _mner;
-    }
-
     function updateManager(address _m) external onlyOwner {
         manager = _m;
         emit UpdateManager(manager, _m);
     }
 
-    function buy(uint256 round) public payable {
+    function buy(uint256 round, uint256 source) public payable nonReentrant {
         require(block.timestamp < endTime[round], "MNER Sale: Over");
         require(
             block.timestamp > startTime[round],
@@ -101,7 +60,7 @@ contract MNERSale is Ownable {
         );
         userOrders[round][msg.sender] += msg.value;
 
-        emit Purchase(msg.sender, msg.value, round, block.timestamp);
+        emit Purchase(msg.sender, msg.value, round, source, block.timestamp);
     }
 
     function _safeTransferFrom(
@@ -135,7 +94,7 @@ contract MNERSale is Ownable {
         uint256 amount,
         uint256 refund,
         bytes memory signature
-    ) external {
+    ) external nonReentrant {
         require(user == msg.sender, "MNER Sale: sender not match");
         require(!claimes[claimId], "MNER Sale: had claimed");
 
@@ -188,19 +147,13 @@ contract MNERSale is Ownable {
             v := and(mload(add(signature, 65)), 255)
         }
 
+        require(uint256(s) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "ECDSA: invalid signature 's' value");
+        require(uint8(v) == 27 || uint8(v) == 28, "ECDSA: invalid signature 'v' value");
         address recoveredAddress = ecrecover(digest, v, r, s);
 
         return recoveredAddress != address(0) && recoveredAddress == manager;
     }
 
-    function withdrawTokensSelf(address token, address to) external onlyOwner {
-        if (token == address(0)) {
-            payable(to).transfer(address(this).balance);
-        } else {
-            uint256 bal = IERC20(token).balanceOf(address(this));
-            IERC20(token).transfer(to, bal);
-        }
-    }
 
     receive() external payable {
         emit Received(msg.sender, msg.value);
@@ -218,6 +171,7 @@ contract MNERSale is Ownable {
     event Purchase(
         address indexed user,
         uint256 round,
+        uint256 source,
         uint256 amount,
         uint256 time
     );

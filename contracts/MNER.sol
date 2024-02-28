@@ -5,42 +5,9 @@ pragma solidity ^0.8.7;
 import "./IERC20.sol";
 import "./Context.sol";
 import "./IERC20Metadata.sol";
+import "./Ownable.sol";
 
-contract Ownable {
-    address internal owner;
 
-    event OwnershipTransferred(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
-
-    constructor() {
-        owner = msg.sender;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner);
-        _;
-    }
-
-    function renounceOwnership() public virtual onlyOwner {
-        _setOwner(address(0));
-    }
-
-    function transferOwnership(address newOwner) public onlyOwner {
-        require(
-            newOwner != address(0),
-            "Ownable: new owner is the zero address"
-        );
-        _setOwner(newOwner);
-    }
-
-    function _setOwner(address newOwner) private {
-        address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
-}
 
 contract MNER is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _balances;

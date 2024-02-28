@@ -3,104 +3,14 @@
 pragma solidity ^0.8.7;
 
 import "./IERC20.sol";
+import "./IERC721.sol";
 import "./SafeERC20.sol";
+import "./ReentrancyGuard.sol";
+import "./Ownable.sol";
+import "./IERC721Receiver.sol";
 
-interface IERC721Receiver {
-    function onERC721Received(
-        address operator,
-        address from,
-        uint256 tokenId,
-        bytes calldata data
-    ) external returns (bytes4);
-}
 
-interface IERC721 {
-    event Transfer(
-        address indexed from,
-        address indexed to,
-        uint256 indexed tokenId
-    );
-    event Approval(
-        address indexed owner,
-        address indexed approved,
-        uint256 indexed tokenId
-    );
-    event ApprovalForAll(
-        address indexed owner,
-        address indexed operator,
-        bool approved
-    );
-
-    function balanceOf(address owner) external view returns (uint256 balance);
-
-    function ownerOf(uint256 tokenId) external view returns (address owner);
-
-    function safeTransferFrom(
-        address from,
-        address to,
-        uint256 tokenId,
-        bytes calldata data
-    ) external;
-
-    function safeTransferFrom(
-        address from,
-        address to,
-        uint256 tokenId
-    ) external;
-
-    function transferFrom(address from, address to, uint256 tokenId) external;
-
-    function approve(address to, uint256 tokenId) external;
-
-    function getApproved(
-        uint256 tokenId
-    ) external view returns (address operator);
-
-    function setApprovalForAll(address operator, bool _approved) external;
-
-    function isApprovedForAll(
-        address owner,
-        address operator
-    ) external view returns (bool);
-}
-
-contract Ownable {
-    address internal owner;
-
-    event OwnershipTransferred(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
-
-    constructor() {
-        owner = msg.sender;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner);
-        _;
-    }
-
-    function renounceOwnership() public virtual onlyOwner {
-        _setOwner(address(0));
-    }
-
-    function transferOwnership(address newOwner) public onlyOwner {
-        require(
-            newOwner != address(0),
-            "Ownable: new owner is the zero address"
-        );
-        _setOwner(newOwner);
-    }
-
-    function _setOwner(address newOwner) private {
-        address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
-}
-
-contract MineralGo is Ownable, IERC721Receiver {
+contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
     mapping(uint256 => uint256) public product;
 
@@ -110,11 +20,11 @@ contract MineralGo is Ownable, IERC721Receiver {
     mapping(uint256 => address) public MNER;
 
     address public awardToken;
-  
 
     uint256 orderId;
     uint256 morderId;
 
+    uint256 public totalStakedMNER;
     mapping(uint256 => Order) public orders;
     mapping(uint256 => MOrder) public morders;
 
@@ -122,18 +32,8 @@ contract MineralGo is Ownable, IERC721Receiver {
 
     mapping(uint256 => bool) public claimes;
 
-    bytes32 public constant PERMIT_TYPEHASH = 0xf9a20c82276f5c164d15d306ea40d25f5a3dd062f72c8a4242a88c8eba769ea2;
-
-    event Claim(
-        uint256 indexed claimId,
-        uint256 claimType,
-        address account,
-        uint256 amount,
-        uint256 deadline,
-        address signer,
-        uint256 time
-    );
-    event UpdateManager(address preManager, address indexed newManager);
+    bytes32 public constant PERMIT_TYPEHASH =
+        0xf9a20c82276f5c164d15d306ea40d25f5a3dd062f72c8a4242a88c8eba769ea2;
 
     struct Order {
         address user;
@@ -153,45 +53,32 @@ contract MineralGo is Ownable, IERC721Receiver {
         bool redeem;
     }
 
-    constructor() {
-        product[0] = 1 * 86400;
-        product[1] = 2 * 86400;
-        product[2] = 3 * 86400;
+    constructor(address _mineralToken, address _mnerToken) Ownable(msg.sender) {
+        product[0] = 30 * 86400;
+        product[1] = 180 * 86400;
+        product[2] = 360 * 86400;
 
-        mproduct[0] = 1 * 86400;
-        mproduct[1] = 2 * 86400;
-        mproduct[2] = 3 * 86400;
-    }
+        mproduct[0] = 30 * 86400;
+        mproduct[1] = 180 * 86400;
+        mproduct[2] = 360 * 86400;
 
-    function setMineralToken(uint256 tokenType, address _token) external onlyOwner {
-      
-        Mineral[tokenType] = _token;
-    }
-    function setMNERToken(uint256 tokenType, address _token) external onlyOwner {
-      
-        MNER[tokenType] = _token;
-    }
-    function setAwardToken(address _token) external onlyOwner {
-        awardToken = _token;
-    }
-    function setMProduct(uint id, uint _times) external onlyOwner {
-        mproduct[id] = _times;
+        Mineral[0] = _mineralToken;
+        MNER[0] = _mnerToken;
+        awardToken = _mnerToken;
     }
 
-    function setProduct(uint id, uint _times) external onlyOwner {
-        product[id] = _times;
+    function awardTokenBalance() public view  returns (uint256) {
+        return IERC20(awardToken).balanceOf(address(this))  - totalStakedMNER;
     }
 
-    function updateManager(address _m) external onlyOwner {
-        manager = _m;
-        emit UpdateManager(manager, _m);
-    }
 
-    function stakeMNER(uint256 _amount, uint256 _id, uint256 _tokenType) payable public {
+    function stakeMNER(
+        uint256 _amount,
+        uint256 _id,
+        uint256 _tokenType
+    ) public nonReentrant {
         require(mproduct[_id] != 0, "Mineral: Staking package is incorrect");
         require(MNER[_tokenType] != address(0), "Mineral: Unsupported token");
-
-        _safeTransferFrom(MNER[_tokenType], msg.sender, address(this), _amount);
 
         morderId++;
         morders[morderId] = MOrder({
@@ -202,11 +89,24 @@ contract MineralGo is Ownable, IERC721Receiver {
             unlockTime: block.timestamp + mproduct[_id],
             redeem: false
         });
+        if (MNER[_tokenType] == awardToken) {
+            totalStakedMNER += _amount;
+        }
 
-        emit StakeMNER(msg.sender, _id, mproduct[_id]/86400, morderId, _tokenType, _amount, block.timestamp);
+        IERC20(MNER[_tokenType]).safeTransferFrom(msg.sender, address(this), _amount);
+
+        emit StakeMNER(
+            msg.sender,
+            _id,
+            mproduct[_id] / 86400,
+            morderId,
+            _tokenType,
+            _amount,
+            block.timestamp
+        );
     }
 
-    function redeemMNER(uint _orderId) public {
+    function redeemMNER(uint256 _orderId) public nonReentrant {
         require(
             morders[_orderId].user == msg.sender,
             "Mineral: Order is incorrect"
@@ -222,38 +122,33 @@ contract MineralGo is Ownable, IERC721Receiver {
         );
 
         morders[_orderId].redeem = true;
-        IERC20(morders[_orderId].token).transfer(msg.sender, morders[_orderId].amount);
+
+        if (morders[_orderId].token == awardToken) {
+            totalStakedMNER -= morders[_orderId].amount;
+        }
+
+        IERC20(morders[_orderId].token).safeTransfer(
+            msg.sender,
+            morders[_orderId].amount
+        );
 
         emit RedeemMNER(msg.sender, _orderId, block.timestamp);
     }
 
-    function _safeTransferFrom(
-        address token,
-        address from,
-        address to,
-        uint256 amount
-    ) private {
-        if (amount == 0) {
-            return;
-        }
-        if (token == address(0)) {
-            require(msg.value == amount);
-        } else {
-            IERC20(token).safeTransferFrom(from, to, amount);
-        }
-    }
-
-    function stakeNft(uint256[] memory _tokenIds, uint256 _id, uint256 _tokenType) public {
+    function stakeNft(
+        uint256[] memory _tokenIds,
+        uint256 _id,
+        uint256 _tokenType
+    ) public nonReentrant {
         require(product[_id] != 0, "Mineral: Staking package is incorrect");
-        require(Mineral[_tokenType] != address(0), "Mineral: Unsupported token");
         require(
-            IERC721(Mineral[_tokenType]).isApprovedForAll(msg.sender, address(this)),
-            "Mineral: The token is not authorized"
+            Mineral[_tokenType] != address(0),
+            "Mineral: Unsupported token"
         );
-
-        for (uint i = 0; i < _tokenIds.length; i++) {
+        for (uint256 i = 0; i < _tokenIds.length; i++) {
             require(
-                IERC721(Mineral[_tokenType]).ownerOf(_tokenIds[i]) == msg.sender,
+                IERC721(Mineral[_tokenType]).ownerOf(_tokenIds[i]) ==
+                    msg.sender,
                 "Mineral: You are not the owner of the token"
             );
             IERC721(Mineral[_tokenType]).safeTransferFrom(
@@ -266,26 +161,32 @@ contract MineralGo is Ownable, IERC721Receiver {
         orders[orderId] = Order({
             user: msg.sender,
             tokenIds: _tokenIds,
-            token:Mineral[_tokenType],
+            token: Mineral[_tokenType],
             proId: _id,
             unlockTime: block.timestamp + product[_id],
             redeem: false
         });
 
-        emit Stake(msg.sender, _id, product[_id] / 86400, orderId, _tokenType, _tokenIds, block.timestamp);
+        emit Stake(
+            msg.sender,
+            _id,
+            product[_id] / 86400,
+            orderId,
+            _tokenType,
+            _tokenIds,
+            block.timestamp
+        );
     }
 
-    function redeemNft(uint _orderId) public {
+    function redeemNft(uint256 _orderId) public nonReentrant {
         require(
             orders[_orderId].user == msg.sender,
             "Mineral: Order is incorrect"
         );
-
         require(
             orders[_orderId].redeem != true,
             "Mineral: Order has been redeemed"
         );
-
         require(
             block.timestamp > orders[_orderId].unlockTime,
             "Mineral: Order has not yet reached the redemption time"
@@ -293,7 +194,7 @@ contract MineralGo is Ownable, IERC721Receiver {
 
         orders[_orderId].redeem = true;
 
-        for (uint i = 0; i < orders[_orderId].tokenIds.length; i++) {
+        for (uint256 i = 0; i < orders[_orderId].tokenIds.length; i++) {
             IERC721(orders[_orderId].token).safeTransferFrom(
                 address(this),
                 msg.sender,
@@ -311,26 +212,75 @@ contract MineralGo is Ownable, IERC721Receiver {
         uint256 amount,
         uint256 deadline,
         bytes memory signature
-    ) external {
-        require(claimType==0 || claimType==1, "Mineral: Unsupported claimType");
+    ) external nonReentrant {
+        require(
+            claimType == 0 || claimType == 1,
+            "Mineral: Unsupported claimType"
+        );
         require(block.timestamp <= deadline, "Mineral: deadline");
         require(user == msg.sender, "Mineral: sender not match");
         require(!claimes[claimId], "Mineral: had claimed");
-
         require(
-            verifySign(claimId, claimType,user, amount, deadline, signature),
+            verifySign(claimId, claimType, user, amount, deadline, signature),
             "Invalid signature"
         );
 
         claimes[claimId] = true;
 
-        if(claimType == 0) {
-            IERC20(awardToken).transfer(user, amount);
+        if (claimType == 0) {
+            IERC20(awardToken).safeTransfer(user, amount);
         } else {
             payable(user).transfer(amount);
         }
 
-        emit Claim(claimId, claimType, user, amount, deadline, manager, block.timestamp);
+        emit Claim(
+            claimId,
+            claimType,
+            user,
+            amount,
+            deadline,
+            manager,
+            block.timestamp
+        );
+    }
+
+    function setMineralToken(uint256 tokenType, address _token)
+        external
+        onlyOwner
+    {
+        require(
+            Mineral[tokenType] == address(0),
+            "Mineral: Cannot change token address"
+        );
+        Mineral[tokenType] = _token;
+        emit UpdateMineralToken(tokenType, _token);
+    }
+
+    function setMNERToken(uint256 tokenType, address _token)
+        external
+        onlyOwner
+    {
+        require(
+            MNER[tokenType] == address(0),
+            "Mineral: Cannot change token address"
+        );
+        MNER[tokenType] = _token;
+        emit UpdateMNERToken(tokenType, _token);
+    }
+
+    function setMProduct(uint256 id, uint256 _times) external onlyOwner {
+        mproduct[id] = _times;
+        emit UpdateMNERProduct(id, _times);
+    }
+
+    function setProduct(uint256 id, uint256 _times) external onlyOwner {
+        product[id] = _times;
+        emit UpdateMineralProduct(id, _times);
+    }
+
+    function updateManager(address _m) external onlyOwner {
+        manager = _m;
+        emit UpdateManager(manager, _m);
     }
 
     function verifySign(
@@ -365,20 +315,16 @@ contract MineralGo is Ownable, IERC721Receiver {
             s := mload(add(signature, 64))
             v := and(mload(add(signature, 65)), 255)
         }
+        
+        require(uint256(s) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "ECDSA: invalid signature 's' value");
+        require(uint8(v) == 27 || uint8(v) == 28, "ECDSA: invalid signature 'v' value");
+
 
         address recoveredAddress = ecrecover(digest, v, r, s);
 
         return recoveredAddress != address(0) && recoveredAddress == manager;
     }
 
-    function withdrawTokensSelf(address token, address to) external onlyOwner {
-        if (token == address(0)) {
-            payable(to).transfer(address(this).balance);
-        } else {
-            uint256 bal = IERC20(token).balanceOf(address(this));
-            IERC20(token).transfer(to, bal);
-        }
-    }
 
     function onERC721Received(
         address,
@@ -393,7 +339,7 @@ contract MineralGo is Ownable, IERC721Receiver {
         emit Received(msg.sender, msg.value);
     }
 
-    event Received(address, uint);
+    event Received(address, uint256);
     event Stake(
         address indexed user,
         uint256 id,
@@ -414,4 +360,19 @@ contract MineralGo is Ownable, IERC721Receiver {
         uint256 time
     );
     event RedeemMNER(address indexed user, uint256 orderId, uint256 time);
+
+    event Claim(
+        uint256 indexed claimId,
+        uint256 claimType,
+        address account,
+        uint256 amount,
+        uint256 deadline,
+        address signer,
+        uint256 time
+    );
+    event UpdateManager(address preManager, address indexed newManager);
+    event UpdateMineralToken(uint256 tokenType, address indexed token);
+    event UpdateMNERToken(uint256 tokenType, address indexed token);
+    event UpdateMineralProduct(uint256 id, uint256 indexed times);
+    event UpdateMNERProduct(uint256 id, uint256 indexed times);
 }
