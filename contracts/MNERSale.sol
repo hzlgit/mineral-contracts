@@ -32,6 +32,14 @@ contract MNERSale is Ownable, ReentrancyGuard {
         uint256 _startTime,
         uint256 _endTime
     ) Ownable(msg.sender) {
+        require(
+            _MNER != address(0),
+            "MNER Sale: address zero is not a valid MNER"
+        );
+        require(
+            _treasuryWallet != address(0),
+            "MNER Sale: address zero is not a valid treasuryWallet"
+        );
         MNER = _MNER;
         treasuryWallet = _treasuryWallet;
         startTime[1] = _startTime;
@@ -45,9 +53,14 @@ contract MNERSale is Ownable, ReentrancyGuard {
     ) external onlyOwner {
         startTime[round] = _startTime;
         endTime[round] = _endTime;
+        emit UpdateTime(round, _startTime, _endTime);
     }
 
     function updateManager(address _m) external onlyOwner {
+        require(
+            _m != address(0),
+            "MNER Sale: address zero is not a valid manager"
+        );
         manager = _m;
         emit UpdateManager(manager, _m);
     }
@@ -131,13 +144,19 @@ contract MNERSale is Ownable, ReentrancyGuard {
             v := and(mload(add(signature, 65)), 255)
         }
 
-        require(uint256(s) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "ECDSA: invalid signature 's' value");
-        require(uint8(v) == 27 || uint8(v) == 28, "ECDSA: invalid signature 'v' value");
+        require(
+            uint256(s) <=
+                0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0,
+            "ECDSA: invalid signature 's' value"
+        );
+        require(
+            uint8(v) == 27 || uint8(v) == 28,
+            "ECDSA: invalid signature 'v' value"
+        );
         address recoveredAddress = ecrecover(digest, v, r, s);
 
         return recoveredAddress != address(0) && recoveredAddress == manager;
     }
-
 
     receive() external payable {
         emit Received(msg.sender, msg.value);
@@ -160,4 +179,5 @@ contract MNERSale is Ownable, ReentrancyGuard {
         uint256 time
     );
     event UpdateManager(address preManager, address indexed newManager);
+    event UpdateTime(uint256 indexed round, uint256 _start, uint256 _end);
 }

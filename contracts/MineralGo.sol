@@ -9,7 +9,6 @@ import "./ReentrancyGuard.sol";
 import "./Ownable.sol";
 import "./IERC721Receiver.sol";
 
-
 contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
     mapping(uint256 => uint256) public product;
@@ -54,6 +53,14 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
     }
 
     constructor(address _mineralToken, address _mnerToken) Ownable(msg.sender) {
+        require(
+            _mineralToken != address(0),
+            "MNER Sale: address zero is not a valid Mineral"
+        );
+        require(
+            _mnerToken != address(0),
+            "MNER Sale: address zero is not a valid MNER"
+        );
         product[0] = 30 * 86400;
         product[1] = 180 * 86400;
         product[2] = 360 * 86400;
@@ -67,10 +74,9 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
         awardToken = _mnerToken;
     }
 
-    function awardTokenBalance() public view  returns (uint256) {
-        return IERC20(awardToken).balanceOf(address(this))  - totalStakedMNER;
+    function awardTokenBalance() public view returns (uint256) {
+        return IERC20(awardToken).balanceOf(address(this)) - totalStakedMNER;
     }
-
 
     function stakeMNER(
         uint256 _amount,
@@ -93,7 +99,11 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
             totalStakedMNER += _amount;
         }
 
-        IERC20(MNER[_tokenType]).safeTransferFrom(msg.sender, address(this), _amount);
+        IERC20(MNER[_tokenType]).safeTransferFrom(
+            msg.sender,
+            address(this),
+            _amount
+        );
 
         emit StakeMNER(
             msg.sender,
@@ -228,6 +238,10 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
         claimes[claimId] = true;
 
         if (claimType == 0) {
+            require(
+                awardTokenBalance() > amount,
+                "Mineral: Insufficient MNER balance"
+            );
             IERC20(awardToken).safeTransfer(user, amount);
         } else {
             payable(user).transfer(amount);
@@ -249,6 +263,10 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
         onlyOwner
     {
         require(
+            _token != address(0),
+            "MNER Sale: address zero is not a valid token address"
+        );
+        require(
             Mineral[tokenType] == address(0),
             "Mineral: Cannot change token address"
         );
@@ -260,6 +278,10 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
         external
         onlyOwner
     {
+        require(
+            _token != address(0),
+            "MNER Sale: address zero is not a valid token address"
+        );
         require(
             MNER[tokenType] == address(0),
             "Mineral: Cannot change token address"
@@ -279,6 +301,10 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
     }
 
     function updateManager(address _m) external onlyOwner {
+        require(
+            _m != address(0),
+            "MNER Sale: address zero is not a valid manager"
+        );
         manager = _m;
         emit UpdateManager(manager, _m);
     }
@@ -315,16 +341,21 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
             s := mload(add(signature, 64))
             v := and(mload(add(signature, 65)), 255)
         }
-        
-        require(uint256(s) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "ECDSA: invalid signature 's' value");
-        require(uint8(v) == 27 || uint8(v) == 28, "ECDSA: invalid signature 'v' value");
 
+        require(
+            uint256(s) <=
+                0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0,
+            "ECDSA: invalid signature 's' value"
+        );
+        require(
+            uint8(v) == 27 || uint8(v) == 28,
+            "ECDSA: invalid signature 'v' value"
+        );
 
         address recoveredAddress = ecrecover(digest, v, r, s);
 
         return recoveredAddress != address(0) && recoveredAddress == manager;
     }
-
 
     function onERC721Received(
         address,
