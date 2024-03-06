@@ -2,6 +2,7 @@
 
 pragma solidity ^0.8.7;
 
+import "./Address.sol";
 import "./IERC20.sol";
 import "./IERC721.sol";
 import "./SafeERC20.sol";
@@ -11,6 +12,7 @@ import "./IERC721Receiver.sol";
 
 contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
+    using Address for address;
     mapping(uint256 => uint256) public product;
 
     mapping(uint256 => uint256) public mproduct;
@@ -155,12 +157,12 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
             Mineral[_tokenType] != address(0),
             "Mineral: Unsupported token"
         );
+        require(
+            _checkOnERC721Received(msg.sender, msg.sender, _tokenIds[0], ""),
+            "ERC721: transfer to non ERC721Receiver implementer"
+        );
+
         for (uint256 i = 0; i < _tokenIds.length; i++) {
-            require(
-                IERC721(Mineral[_tokenType]).ownerOf(_tokenIds[i]) ==
-                    msg.sender,
-                "Mineral: You are not the owner of the token"
-            );
             IERC721(Mineral[_tokenType]).safeTransferFrom(
                 msg.sender,
                 address(this),
@@ -355,6 +357,39 @@ contract MineralGo is Ownable, ReentrancyGuard, IERC721Receiver {
         address recoveredAddress = ecrecover(digest, v, r, s);
 
         return recoveredAddress != address(0) && recoveredAddress == manager;
+    }
+
+    function _checkOnERC721Received(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory data
+    ) private returns (bool) {
+        if (to.isContract()) {
+            try
+                IERC721Receiver(to).onERC721Received(
+                    _msgSender(),
+                    from,
+                    tokenId,
+                    data
+                )
+            returns (bytes4 retval) {
+                return retval == IERC721Receiver.onERC721Received.selector;
+            } catch (bytes memory reason) {
+                if (reason.length == 0) {
+                    revert(
+                        "ERC721: transfer to non ERC721Receiver implementer"
+                    );
+                } else {
+                    /// @solidity memory-safe-assembly
+                    assembly {
+                        revert(add(32, reason), mload(reason))
+                    }
+                }
+            }
+        } else {
+            return true;
+        }
     }
 
     function onERC721Received(
